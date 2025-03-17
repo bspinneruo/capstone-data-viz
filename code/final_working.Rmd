@@ -1,0 +1,262 @@
+---
+title: "Racial Disparities in School Discipline: Explorer Dashboard"
+author: Brittany Spinner
+output:
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+    theme:
+      version: 4
+      bg: "#a1a1a1"
+      fg: "#303333"
+      primary: "#e5de54"
+      navbar-bg: "#808c73"
+      base_font: 
+        google: Prompt
+      heading_font:
+        google: Sen
+      code_font:
+        google: 
+          family: Seaford
+          local: false
+runtime: shiny
+---
+
+
+Dashboard
+=======================================================================
+
+Row
+-----------------------------------------------------------------------
+
+### Corpral ban status by State Since 2020
+
+```{r}
+library(flexdashboard)
+library(shiny)
+library(ggplot2)
+library(dplyr)
+library(leaflet)
+library(plotly)
+library(sf)
+library(rio)
+library(here)
+library(tidyverse)
+# Load Data
+df1 <- import(here("data/corp_76to20_bystate_MGyearrecoded.xlsx"))
+df2 <- import(here("data/suspensions_72to21_bystate_MGyearrecoded.xlsx"))
+df3 <- import(here("data/treatment dataset_2year.xlsx"))
+
+# Filter for states adopting bans in 2020+
+df_corp <- df3 %>%
+  filter(YEAR > 2020) %>%
+  group_by(STATE_CODE)
+
+
+# Convert US states to an sf object
+us_states_sf <- st_as_sf(maps::map("state", fill = TRUE, plot = FALSE))
+
+# Ensure the correct CRS (Convert to EPSG:4326 - WGS84)
+us_states_sf <- st_transform(us_states_sf, crs = 4326)  # ✅ Convert CRS to WGS84
+
+# Fix column names for merging
+us_states_sf <- us_states_sf %>%
+  rename(region = ID) %>%
+  mutate(region = tolower(region))
+
+# Create state lookup for abbreviations
+state_lookup <- data.frame(STATE_CODE = state.abb, region = tolower(state.name))
+
+# Merge df_corp with full state names
+df_corp_join <- left_join(df_corp, state_lookup, by = "STATE_CODE")
+
+# Fix DC missing in state mapping
+df_corp_join$region <- if_else(is.na(df_corp_join$region), "district of columbia", df_corp_join$region)
+
+# Merge with map data
+df <- left_join(us_states_sf, df_corp_join, by = "region")
+
+# Define color palette
+color_palette <- list("0" = "#e5de54", "1" = "#808c73")
+
+brand_colors <- list(
+  dark_gray = "#303333",
+  sage = "#808c73",
+  light_gray = "#bdbfbf"
+)
+
+
+# Store selected state in a reactive value
+selected_state <- reactiveVal(NULL)
+
+
+# # Create state lookup for abbreviations
+# state_lookup <- data.frame(STATE_CODE = state.abb, region = tolower(state.name))
+
+
+```
+
+
+```{r}
+### Static Map
+
+renderPlot({
+  ggplot() +
+    geom_sf(data = df, aes(fill = as.factor(DD)), color = "white", size = 0.3) +
+    scale_fill_manual(values = color_palette, labels = c("Not Adopted", "Adopted")) +
+    theme_minimal() +
+    labs(
+      title = "Corporal Punishment Ban Adoption by State",
+      subtitle = "States that adopted bans starting in 2020",
+      fill = "Ban Status"
+    ) +
+    theme(
+      axis.text = element_blank(),
+      axis.ticks = element_blank(),
+      panel.grid = element_blank()
+    )
+})
+
+```
+
+Interactive plot
+=======================================================================
+
+Row {.tabset id="main_tabs"}
+-------------------------------------
+
+
+
+```{r}
+
+# Merge df_corp with full state names
+df_corp2 <- left_join(df2, state_lookup, by = "STATE_CODE")
+
+# Fix DC missing in state mapping
+df_corp2$region <- if_else(is.na(df_corp2$region), "district of columbia", df_corp2$region)
+
+# Merge with map data
+int_data <- left_join(us_states_sf, df_corp2, by = "region")
+## Combined all -- us_states_sf2
+
+### Pivot race wider 
+
+int_data <- int_data %>%
+  mutate(across(c(pct_, OSS_), ~ replace_na(.x, 0))) %>%  # Replace NA with 0 in selected columns
+  pivot_wider(
+    names_from = race,   # Convert race categories into column names
+    values_from = pct_,  # Values to fill in new columns
+    values_fill = list(pct_ = 0)) # replace na's with 0s
+
+# View transformed data
+head(int_data)
+
+### Interactive map 
+output$map <- renderLeaflet({
+  leaflet(int_data) %>%
+    addTiles() %>%
+    addPolygons(
+      fillColor = ~colorNumeric("Greens", int_data$total)(total),
+      color = "white",
+      weight = 1,
+      fillOpacity = 0.8,
+      highlightOptions = highlightOptions(weight = 3, color = "#666", fillOpacity = 0.9),
+      label = ~paste0(region, ": ", round(total, 2), "% Suspended"),
+      layerId = ~STATE_CODE  # ✅ Use STATE_CODE instead of region
+    )
+})
+
+leafletOutput("map", height = 600)
+```
+
+```{r}
+
+
+########################################################
+### Observe Click on Map (Dynamically Updates Timeline)
+
+observeEvent(input$map_shape_click, {
+  print(input$map_shape_click)  # ✅ Debugging: Check if this captures a state
+  clicked_state <- input$map_shape_click$id  # Get the clicked state name
+  
+  if (!is.null(clicked_state)) {
+    print(paste("Clicked State:", clicked_state))  # ✅ Debugging: Print clicked state
+    selected_state(clicked_state)  # Store clicked state in reactive value
+    updateTabsetPanel(session, "main_tabs", selected = "State Timeline")
+  }
+})
+```
+
+```{r}
+
+long_data <- int_data %>%
+    pivot_longer(cols = c(AI, AS, BL, HI, HP, MR, WH, total), names_to = "race", values_to = "pct_") %>% 
+  group_by(YEAR, race)
+
+
+###### State-Specific Trends Plotly Time Series 
+output$state_plot <- renderPlotly({
+  req(selected_state())  # Ensure a state is selected
+
+  # Filter data for selected state
+state_data <- long_data %>% filter(STATE_CODE == selected_state())  # ✅ Match with STATE_CODE
+
+  # Create smoothed data
+  smoothed_data <- state_data %>%
+    group_by(race) %>%
+    mutate(Smoothed = predict(loess(pct_ ~ YEAR, span = 0.3)))
+
+  # Define custom colors
+  custom_colors <- c(
+    "AI" = brand_colors$light_gray, 
+    "BL" = brand_colors$sage, 
+    "WH" = brand_colors$dark_gray
+  )
+
+  # Create interactive Plotly line chart
+  plot_ly(
+    data = state_data, 
+    x = ~YEAR, 
+    y = ~pct_, 
+    color = ~race, 
+    type = 'scatter', 
+    mode = 'lines'
+  ) %>%
+  add_trace(
+    data = smoothed_data, 
+    x = ~YEAR, 
+    y = ~Smoothed, 
+    color = ~race, 
+    type = 'scatter', 
+    mode = 'lines',
+    showlegend = FALSE  # Hide duplicate legend entries
+  ) %>%
+  layout(
+    title = paste("Suspension Rates in", selected_state()),
+    xaxis = list(title = "Year"),
+    yaxis = list(title = "Suspension Rate (%)"),
+    legend = list(title = list(text = "Race"))
+  )
+})
+
+plotlyOutput("state_plot", height = 500)
+```
+
+Row {.tabset, id="main_tabs"}
+-------------------------------------
+
+```{r}
+tabPanel("State Timeline", plotlyOutput("state_plot", height = 500))  # ✅ Use `plotlyOutput()`
+
+```
+
+Predictive plot
+=======================================================================
+
+Row {.tabset}
+-------------------------------------
+
+
+
+
+

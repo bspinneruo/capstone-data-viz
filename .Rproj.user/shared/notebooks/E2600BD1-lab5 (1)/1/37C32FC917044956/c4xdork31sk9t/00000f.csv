@@ -1,0 +1,5 @@
+"0","df0 <- df0 %>%"
+"0","  select(Study_ID, BMI, age_year, EDEQ_restraint, DERS_total, DMS_mean, EDS_total, "
+"0","         SATAQ_total) %>%"
+"0","  mutate(EDS_total = ifelse(EDS_total == -99, NA, EDS_total)) %>%"
+"0","  drop_na()"

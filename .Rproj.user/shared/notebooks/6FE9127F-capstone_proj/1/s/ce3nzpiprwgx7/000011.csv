@@ -1,0 +1,8 @@
+"0",""
+"0","# Prediction Output"
+"0","policy_prediction <- renderText({"
+"0","  policy <- input$policy"
+"0","  disparity <- predicted_disparities[which(policies == policy)]"
+"0","  paste(""Under the"", policy, ""policy, the predicted racial/ethnic disparity in discipline rates is"", disparity, ""%."")"
+"0","})"
+"0","textOutput(""policy_prediction"")"

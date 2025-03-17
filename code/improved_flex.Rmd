@@ -1,0 +1,177 @@
+---
+title: "Racial Disparities in School Discipline: Explorer Dashboard"
+author: Brittany Spinner
+output:
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+    theme:
+      version: 4
+      bg: "#a1a1a1"
+      fg: "#303333"
+      primary: "#e5de54"
+      navbar-bg: "#808c73"
+      base_font: 
+        google: Prompt
+      heading_font:
+        google: Sen
+      code_font:
+        google: 
+          family: Seaford
+          local: false
+runtime: shiny
+---
+
+```{r}
+library(flexdashboard)
+library(shiny)
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+library(leaflet)
+library(sf)
+library(rio)
+library(DT)
+
+# Brand Colors
+brand_colors <- list(
+  dark_gray = "#303333",
+  yellow = "#e5de54",
+  sage = "#808c73",
+  gray = "#a1a1a1",
+  light_gray = "#bdbfbf"
+)
+
+# Brand Theme for ggplot
+theme_brand <- function(base_size = 12) {
+  theme_minimal(base_size = base_size) %+replace%
+    theme(
+      text = element_text(family = "Seaford"),
+      plot.title = element_text(size = rel(1.2), face = "bold"),
+      plot.subtitle = element_text(size = rel(1)),
+      axis.title = element_text(face = "bold"),
+      panel.grid.major = element_line(color = brand_colors$light_gray),
+      panel.grid.minor = element_blank(),
+      legend.position = "bottom"
+    )
+}
+```
+
+
+```{r}
+library(here)
+df1 <- import(here("data/corp_76to20_bystate_MGyearrecoded.xlsx"))
+df2 <- import(here("data/suspensions_72to21_bystate_MGyearrecoded.xlsx"))
+df3 <- import(here("data/treatment dataset_2year.xlsx"))
+
+# Filter for states adopting bans in 2020+
+df_corp <- df3 %>%
+  filter(YEAR > 2020) %>%
+  group_by(STATE_CODE)
+
+# Convert US states to an sf object
+us_states_sf <- st_as_sf(maps::map("state", fill = TRUE, plot = FALSE))
+
+# Fix column names for merging
+us_states_sf <- us_states_sf %>%
+  rename(region = ID) %>%
+  mutate(region = tolower(region))
+
+# Create state lookup for abbreviations
+state_lookup <- data.frame(STATE_CODE = state.abb, region = tolower(state.name))
+
+# Merge df_corp with full state names
+df_corp <- left_join(df_corp, state_lookup, by = "STATE_CODE")
+
+# Fix DC missing in state mapping
+df_corp$region <- if_else(is.na(df_corp$region), "district of columbia", df_corp$region)
+
+# Merge with map data
+us_states_sf <- left_join(us_states_sf, df_corp, by = "region")
+
+# Define color palette
+color_palette <- list("0" = brand_colors$yellow, "1" = brand_colors$dark_gray)
+```
+
+Row {.tabset}
+-------------------------------------
+
+```{r}
+library(jsonlite)
+
+ggplot() +
+  geom_sf(data = us_states_sf, aes(fill = as.factor(DD)), color = "white", size = 0.3) +
+  scale_fill_manual(values = color_palette, labels = c("Not Adopted", "Adopted")) +
+  theme_minimal() +
+  labs(
+    title = "Corporal Punishment Ban Adoption by State",
+    subtitle = "States that adopted bans starting in 2020",
+    fill = "Ban Status"
+  ) +
+  theme(
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    panel.grid = element_blank()
+  )
+```
+
+
+```{r}
+## interactive map
+output$map <- renderLeaflet({
+  leaflet(us_states_sf) %>%
+    addTiles() %>%
+    addPolygons(
+      fillColor = ~color_palette[as.character(DD)],
+      color = "white",
+      weight = 1,
+      fillOpacity = 0.8,
+      highlightOptions = highlightOptions(weight = 3, color = "#666", fillOpacity = 0.9),
+      label = ~paste0(region, ": ", ifelse(DD == 1, "Adopted", "Not Adopted")),
+      layerId = ~region
+    )
+})
+leafletOutput("map", height = 600)
+```
+
+Row {.tabset .hidden}
+-------------------------------------
+
+```{r}
+
+## state specific timeline 
+observeEvent(input$map_shape_click, {
+  selected_state <- input$map_shape_click$id  # Get state name from click event
+  
+  # Render plot dynamically
+  output$state_plot <- renderPlot({
+    
+    # Filter data for selected state
+    state_data <- df2 %>% filter(region == selected_state)
+    
+    ggplot(state_data, aes(x = YEAR, y = SuspensionRate, group = Race, color = Race)) +
+      geom_line(alpha = 0.6) + 
+      geom_smooth(method = "loess", se = FALSE, span = 0.7) +
+      scale_color_manual(values = c(
+        "AI" = brand_colors$light_gray, 
+        "BL" = brand_colors$sage, 
+        "WH" = brand_colors$dark_gray
+      )) +
+      theme_brand() + 
+      labs(
+        title = paste("Suspension Rates in", selected_state),
+        x = "Year",
+        y = "Suspension Rates (%)"
+      )
+  })
+})
+
+# Default placeholder when no state is clicked
+output$state_plot <- renderPlot({
+  ggplot() + theme_void() + 
+    labs(title = "Click a state to view its discipline timeline")
+})
+plotOutput("state_plot", height = 500)
+```
+
+

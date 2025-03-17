@@ -1,0 +1,129 @@
+"0",""
+"0","library(flexdashboard)"
+"0","library(shiny)"
+"0","library(ggplot2)"
+"0","library(dplyr)"
+"2","
+Attaching package: ‘dplyr’
+
+"
+"2","The following objects are masked from ‘package:stats’:
+
+    filter, lag
+
+"
+"2","The following objects are masked from ‘package:base’:
+
+    intersect, setdiff, setequal, union
+
+"
+"0","library(leaflet)"
+"2","Registered S3 method overwritten by 'htmlwidgets':
+  method           from         
+  print.htmlwidget tools:rstudio
+"
+"0","library(plotly)"
+"2","Registered S3 method overwritten by 'data.table':
+  method           from
+  print.data.table     
+"
+"2","
+Attaching package: ‘plotly’
+
+"
+"2","The following object is masked from ‘package:ggplot2’:
+
+    last_plot
+
+"
+"2","The following object is masked from ‘package:stats’:
+
+    filter
+
+"
+"2","The following object is masked from ‘package:graphics’:
+
+    layout
+
+"
+"0","library(sf)"
+"2","Linking to GEOS 3.11.0, GDAL 3.5.3, PROJ 9.1.0; sf_use_s2() is TRUE
+"
+"0","library(rio)"
+"2","The following rio suggested packages are not installed: ‘arrow’, ‘hexView’, ‘fst’, ‘pzfx’, ‘rmatio’, ‘readODS’, ‘qs’
+Use 'install_formats()' to install them
+"
+"2","
+Attaching package: ‘rio’
+
+"
+"2","The following object is masked from ‘package:plotly’:
+
+    export
+
+"
+"0","library(here)"
+"2","here() starts at /Users/brittanyspinner/Desktop/QRME PhD 24-25/phd_w2025/educ640_capstone/educ640_R
+"
+"0","library(tidyverse)"
+"2","── [1mAttaching core tidyverse packages[22m ───────────────────────────────────────────── tidyverse 2.0.0 ──
+[32m✔[39m [34mforcats  [39m 1.0.0     [32m✔[39m [34mstringr  [39m 1.5.1
+[32m✔[39m [34mlubridate[39m 1.9.3     [32m✔[39m [34mtibble   [39m 3.2.1
+[32m✔[39m [34mpurrr    [39m 1.0.2     [32m✔[39m [34mtidyr    [39m 1.3.1
+[32m✔[39m [34mreadr    [39m 2.1.5     "
+"2","── [1mConflicts[22m ─────────────────────────────────────────────────────────────── tidyverse_conflicts() ──
+[31m✖[39m [34mplotly[39m::[32mfilter()[39m masks [34mdplyr[39m::filter(), [34mstats[39m::filter()
+[31m✖[39m [34mdplyr[39m::[32mlag()[39m     masks [34mstats[39m::lag()
+[36mℹ[39m Use the ]8;;http://conflicted.r-lib.org/conflicted package]8;; to force all conflicts to become errors"
+"0","# Load Data"
+"0","df1 <- import(here(""data/corp_76to20_bystate_MGyearrecoded.xlsx""))"
+"0","df2 <- import(here(""data/suspensions_72to21_bystate_MGyearrecoded.xlsx""))"
+"0","df3 <- import(here(""data/treatment dataset_2year.xlsx""))"
+"0",""
+"0","# Filter for states adopting bans in 2020+"
+"0","df_corp <- df3 %>%"
+"0","  filter(YEAR > 2020) %>%"
+"0","  group_by(STATE_CODE)"
+"0",""
+"0",""
+"0","# Convert US states to an sf object"
+"0","us_states_sf <- st_as_sf(maps::map(""state"", fill = TRUE, plot = FALSE))"
+"0",""
+"0","# Ensure the correct CRS (Convert to EPSG:4326 - WGS84)"
+"0","us_states_sf <- st_transform(us_states_sf, crs = 4326)  # convert CRS to WGS84"
+"0",""
+"0","# Fix column names for merging"
+"0","us_states_sf <- us_states_sf %>%"
+"0","  rename(region = ID) %>%"
+"0","  mutate(region = tolower(region))"
+"0",""
+"0","# Create state lookup for abbreviations"
+"0","state_lookup <- data.frame(STATE_CODE = state.abb, region = tolower(state.name))"
+"0",""
+"0","# Merge df_corp with full state names"
+"0","df_corp_join <- left_join(df_corp, state_lookup, by = ""STATE_CODE"")"
+"0",""
+"0","# Fix DC missing in state mapping"
+"0","df_corp_join$region <- if_else(is.na(df_corp_join$region), ""district of columbia"", df_corp_join$region)"
+"0",""
+"0","# Merge with map data"
+"0","df_join <- left_join(us_states_sf, df_corp_join, by = ""region"")"
+"0",""
+"0","# Define color palette"
+"0","color_palette <- list(""0"" = ""#e5de54"", ""1"" = ""#808c73"")"
+"0",""
+"0","brand_colors <- list("
+"0","  dark_gray = ""#303333"","
+"0","  sage = ""#808c73"","
+"0","  light_gray = ""#bdbfbf"""
+"0",")"
+"0",""
+"0",""
+"0","# Store selected state in a reactive value"
+"0","selected_state <- reactiveVal(NULL)"
+"0",""
+"0",""
+"0","# # Create state lookup for abbreviations"
+"0","# state_lookup <- data.frame(STATE_CODE = state.abb, region = tolower(state.name))"
+"0",""
+"0",""

@@ -1,0 +1,63 @@
+---
+title: "capstone questions"
+author: "(enter your name)"
+date: "2025-01-28"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+questions for Dr. Gopalan
+
+- in the df2 dataset wha tdoes MEM_ (members?), OSS_ (out of school suspensions?), and pct_ stand for? is it the mean pct for each race? number of individuals received CORP? 
+
+- Race- AI (american indian/alaska native), AS (Asian), BL (Black), HI (hispanic), HP (Hawaiin pacific islander), MR (mixed race), WH (white), total = total. 
+
+df3- T_YEAR (treatment year?)
+*** DC- is that washington DC? treated in dataset-- create region,  
+it looks like there are 10 missing DDs 
+
+
+there are specific groupings to stick to 
+
+When plotting national trends of suspension rates, and creating mean pcts for differing race categories, how should i handle missing values?
+
+
+when susbmitting you suggested fork cloning for final project for full reproducability, how will we be able to do that since the data wont be on your desktop?
+
+I have to change the seaford in the font for mac
+
+
+
+
+STILL WORKING ON THE REST... 
+
+Geospatial Trends {data-height=650}
+
+Disparities by state or District
+CO- bans and OSS
+overall state trend by race for these disciplinary actions, see the data, but not download, line graphs to show up for different states when clicking on.
+
+how should the map be displayed (four panels):
+- sage and yellow for primary colors 
+- 
+first(static)- map, all states, two diff colors, states adopted ban and not (2020, df3)
+2nd (static)- which states have banned and have not (2020, df3$ T_YEAR, year state adopted ban, ) OSS and (Separate) CP rate at national level, static, look like across the country, then pick from state, changes based on state graphs by race ethnicity changes based on which state they're picking 
+2nd- this trend, state time, trend for OP
+3rd/4th- Predictor: if the state had banned corp punishment, what would have been
+ 
+use a parapmeter to loop in to the map, 
+
+## Tabsets for each 
+click on the state opens up CPR over time for that state, 
+click on texas and takes them to another page and shows them a graph, table of rates, etc. 
+
+Wk9/Wk 10 add methods page and all other information, 
+
+Policy and predictor piece-- flexdashboard, not as complicated but deploy as well, move to shiny with other interactions. 
+
+
+
+

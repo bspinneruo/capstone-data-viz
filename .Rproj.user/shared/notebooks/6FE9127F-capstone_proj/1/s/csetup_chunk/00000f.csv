@@ -1,0 +1,30 @@
+"0","# "
+"0","# install.packages(""flexdashboard"")"
+"0","# install.packages(""shiny"")"
+"0","# install.packages(""leaflet"")"
+"0","# install.packages(""plotly"")"
+"0","# install.packages(""DT"")"
+"0","# install.packages(""forecast"")"
+"0","#Load required libraries"
+"0","library(flexdashboard)"
+"0","library(shiny)"
+"0","library(leaflet)"
+"0","library(plotly)"
+"0","library(dplyr)"
+"0","library(ggplot2)"
+"0","library(forecast)  # For time-series analysis"
+"2","Registered S3 method overwritten by 'quantmod':
+  method            from
+  as.zoo.data.frame zoo 
+"
+"0","library(DT)  # For displaying data tables"
+"2","
+Attaching package: ‘DT’
+
+"
+"2","The following objects are masked from ‘package:shiny’:
+
+    dataTableOutput, renderDataTable
+
+"
+"0","library(rio)"

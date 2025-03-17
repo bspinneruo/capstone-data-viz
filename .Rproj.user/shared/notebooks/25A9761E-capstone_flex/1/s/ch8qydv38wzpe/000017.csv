@@ -1,0 +1,31 @@
+"0","# Create the leaflet map
+leaflet(us_states_sf2) %>%
+  addTiles() %>%
+  setView(lng = -98.5, lat = 39.8, zoom = 4) %>%
+  addPolygons(
+    fillColor = ~color_palette[as.character(DD)],  # Map DD values to colors
+    weight = 1,
+    opacity = 1,
+    color = ""white"",
+    fillOpacity = 0.8,
+    highlightOptions = highlightOptions(
+      weight = 3,
+      color = c(""#e5de54"", ""#808c73""),
+      fillOpacity = 0.9,
+      bringToFront = TRUE
+    ),
+    label = ~paste0(region, "": "", ifelse(DD == 1, ""Adopted"", ""Not Adopted""))
+  ) %>%
+  addLegend(
+    position = ""bottomright"",
+    colors = c(""#e5de54"", ""#808c73""),
+    labels = c(""Not Adopted"", ""Adopted""),
+    title = ""Corporal Punishment Ban Status""
+  )
+"
+"2","Warning: sf layer has inconsistent datum (+proj=longlat +ellps=clrk66 +no_defs).
+Need '+proj=longlat +datum=WGS84'"
+"2","Input to asJSON(keep_vec_names=TRUE) is a named vector. In a future version of jsonlite, this option will not be supported, and named vectors will be translated into arrays instead of objects. If you want JSON object output, please use a named list instead. See ?toJSON.
+"
+"2","Input to asJSON(keep_vec_names=TRUE) is a named vector. In a future version of jsonlite, this option will not be supported, and named vectors will be translated into arrays instead of objects. If you want JSON object output, please use a named list instead. See ?toJSON.
+"

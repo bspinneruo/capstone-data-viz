@@ -1,0 +1,744 @@
+---
+title: "Racial Disparities in School Discipline: Explorer Dashboard"
+author: Brittany Spinner
+output:
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+    theme:
+      version: 4
+      bg: "white"
+      fg: "#303333"
+      primary: "#e5de54"
+      navbar-bg: "#808c73"
+      base_font: 
+        google: Prompt
+      heading_font:
+        google: Sen
+      code_font:
+        google: 
+          family: Seaford
+          local: false
+runtime: shiny
+---
+
+
+Dashboard
+=======================================================================
+
+Row
+-----------------------------------------------------------------------
+
+### Corpral ban status by State Since 2020
+
+```{r}
+
+library(flexdashboard)
+library(shiny)
+library(ggplot2)
+library(dplyr)
+library(leaflet)
+library(plotly)
+library(sf)
+library(rio)
+library(here)
+library(tidyverse)
+
+# Load Data
+df1 <- import(here("data/corp_76to20_bystate_MGyearrecoded.xlsx"))
+df2 <- import(here("data/suspensions_72to21_bystate_MGyearrecoded.xlsx"))
+df3 <- import(here("data/treatment dataset_2year.xlsx"))
+
+# Filter for states adopting bans in 2020+
+df_corp <- df3 %>%
+  filter(YEAR > 2020) %>%
+  group_by(STATE_CODE)
+
+
+# Convert US states to an sf object
+us_states_sf <- st_as_sf(maps::map("state", fill = TRUE, plot = FALSE))
+
+# Ensure the correct CRS (Convert to EPSG:4326 - WGS84)
+us_states_sf <- st_transform(us_states_sf, crs = 4326)  # convert CRS to WGS84
+
+# Fix column names for merging
+us_states_sf <- us_states_sf %>%
+  rename(region = ID) %>%
+  mutate(region = tolower(region))
+
+# Create state lookup for abbreviations
+state_lookup <- data.frame(STATE_CODE = state.abb, region = tolower(state.name))
+
+# Merge df_corp with full state names
+df_corp_join <- left_join(df_corp, state_lookup, by = "STATE_CODE")
+
+# Fix DC missing in state mapping
+df_corp_join$region <- if_else(is.na(df_corp_join$region), "district of columbia", df_corp_join$region)
+
+# Merge with map data
+df_join <- left_join(us_states_sf, df_corp_join, by = "region")
+
+# Define color palette
+color_palette <- list("0" = "#e5de54", "1" = "#808c73")
+
+brand_colors <- list(
+  dark_gray = "#303333",
+  sage = "#808c73",
+  light_gray = "#bdbfbf"
+)
+
+
+# Store selected state in a reactive value
+selected_state <- reactiveVal(NULL)
+
+
+# # Create state lookup for abbreviations
+# state_lookup <- data.frame(STATE_CODE = state.abb, region = tolower(state.name))
+
+
+```
+
+
+```{r}
+### Static Map
+
+renderPlot({
+  ggplot() +
+    geom_sf(data = df_join, aes(fill = as.factor(DD)), color = "white", size = 0.3) +
+    scale_fill_manual(values = color_palette, labels = c("Not Adopted", "Adopted")) +
+    theme_minimal() +
+    labs(
+      title = "Corporal Punishment Ban Adoption by State",
+      subtitle = "States that adopted bans starting in 2020",
+      fill = "Ban Status"
+    ) +
+    theme(
+      axis.text = element_blank(),
+      axis.ticks = element_blank(),
+      panel.grid = element_blank()
+    )
+})
+
+```
+
+Interactive plot
+=======================================================================
+
+Row {.tabset id="main_tabs"}
+-------------------------------------
+
+
+
+```{r, warning=FALSE, message=FALSE}
+
+# Merge df_corp with full state names
+df_corp2 <- left_join(df2, state_lookup, by = "STATE_CODE")
+
+# Fix DC missing in state mapping
+df_corp2$region <- if_else(is.na(df_corp2$region), "district of columbia", df_corp2$region)
+
+# Merge with map data
+int_data <- left_join(us_states_sf, df_corp2, by = "region")
+## Combined all -- us_states_sf2
+
+### Pivot race wider 
+
+int_data <- int_data %>%
+  mutate(across(c(pct_, OSS_), ~ replace_na(.x, 0))) %>%  # Replace NA with 0 in selected columns
+  pivot_wider(
+    names_from = race,   # Convert race categories into column names
+    values_from = pct_,  # Values to fill in new columns
+    values_fill = list(pct_ = 0)) # replace na's with 0s
+# Drop geometry column before summarization
+# 
+# int_data_clean <- int_data %>%
+#   st_drop_geometry()  # Removes spatial geometry
+# 
+# int_data_clean <- int_data_clean %>%
+#   group_by(region) %>%
+#   summarise(Average_Suspensions = mean(total, na.rm = TRUE))
+# 
+# int_data <- left_join(int_data_clean, int_data, by = "region")
+# 
+
+
+long_data <- int_data %>%
+    pivot_longer(cols = c(AI, AS, BL, HI, HP, MR, WH, total), names_to = "race", values_to = "pct_") %>% 
+  group_by(YEAR, race, STATE_CODE)
+
+
+
+# View transformed data
+#head(int_data)
+
+### Interactive map 
+output$map <- renderLeaflet({
+  leaflet(int_data, options = leafletOptions(zoomControl = FALSE, dragging = FALSE)) %>%
+    
+    addTiles() %>%
+       
+    # ✅ Set initial view to focus on the U.S.
+    setView(lng = -98.5795, lat = 39.8283, zoom = 4) %>%  # Center at U.S. geographic center
+    
+    # ✅ Restrict users from moving outside the U.S.
+    fitBounds(lng1 = -125, lat1 = 25, lng2 = -66, lat2 = 50) %>%
+    
+    addPolygons(
+      fillColor = ~colorNumeric("Blues", int_data$total)(total),
+      color = "white",
+      weight = 1,
+      fillOpacity = 0.8,
+      highlightOptions = highlightOptions(weight = 3, color = "#666", fillOpacity = 0.9),
+      label = ~paste0(region, ": ", round(total, 2), "% Avg. Overall Suspended"),
+      layerId = ~STATE_CODE  # Use STATE_CODE instead of region
+    )
+})
+
+leafletOutput("map", height = 600)
+
+library(dplyr)
+library(sf)
+
+# Drop geometry column before summarization
+int_data_clean <- int_data %>%
+  st_drop_geometry()  # Removes spatial geometry
+
+
+
+```
+
+```{r}
+
+
+########################################################
+### Observe Click on Map (Dynamically Updates Timeline)
+
+observeEvent(input$map_shape_click, {
+  print(input$map_shape_click)  # check if this captures a state
+  clicked_state <- input$map_shape_click$id  # Get the clicked state name
+  
+  if (!is.null(clicked_state)) {
+    print(paste("Clicked State:", clicked_state))  # print clicked state
+    selected_state(clicked_state)  # Store clicked state in reactive value
+    updateTabsetPanel(session, "main_tabs", selected = "State Timeline")
+  }
+})
+```
+
+```{r}
+
+
+###### State-Specific Trends Plotly Time Series 
+output$state_plot <- renderPlotly({
+  req(selected_state())  # Ensure a state is selected
+
+  # Filter data for selected state
+state_data <- long_data %>% filter(STATE_CODE == selected_state())  # Match with STATE_CODE
+
+ state_data <- state_data %>%
+    mutate(pct_ = pmax(0, pct_)) 
+
+  # Create smoothed data
+  smoothed_data <- state_data %>%
+    group_by(race) %>%
+    mutate(Smoothed = pmax(0, predict(loess(pct_ ~ YEAR, span = 0.3))))
+
+  # Define custom colors
+race_colors <- c(
+  "AI" = "#bdbfbf",  # American Indian
+  "AS" = "#808c73",  # Asian
+  "BL" = "#677812",  # Black
+  "HI" = "#e5de54",  # Hispanic
+  "HP" = "#a1a1a1",  # Pacific Islander
+  "MR" = "#303333",  # Multiracial
+  "WH" = "#0c4d1d"  # White
+)
+
+
+  # Create interactive Plotly line chart
+  plot_ly(
+    data = smoothed_data, 
+    x = ~YEAR, 
+    y = ~Smoothed, 
+    color = ~race, 
+    colors = race_colors
+    # type = 'scatter', 
+    # mode = 'lines'
+  ) %>%
+  add_trace(
+    data = smoothed_data, 
+    x = ~YEAR, 
+    y = ~Smoothed, 
+    color = ~race, 
+     colors = race_colors,
+    type = 'scatter', 
+    mode = 'lines',
+    showlegend = TRUE  # Hide duplicate legend entries
+  ) %>%
+  layout(
+    title = paste("Suspension Rates in", selected_state()),
+    xaxis = list(title = "Year"),
+    yaxis = list(title = "Suspension Rate (%)"),
+      yaxis = list(range = c(0, NA)), 
+    legend = list(title = list(text = "Race"))
+  )
+})
+
+plotlyOutput("state_plot", height = 500)
+```
+
+Row {.tabset, id="main_tabs"}
+-------------------------------------
+
+```{r}
+tabPanel("State Timeline", plotlyOutput("state_plot", height = 500))  # ✅ Use `plotlyOutput()`
+
+```
+
+Predictive plot
+=======================================================================
+
+Row {.tabset}
+-------------------------------------
+
+
+```{r}
+#install.packages("forecast")
+library(forecast)
+### 📌 UI: Policy Selection Input
+selectInput("policy", "Select Policy:", choices = c(
+  "No Change",
+  "Restorative Practices",
+  "Corporal Punishment Ban"
+))
+
+### 📌 Reactive Prediction Calculation
+output$policy_prediction <- renderText({
+  policy <- input$policy
+  predicted_disparities <- c("No Change" = 15, "Restorative Practices" = 10, "Corporal Punishment Ban" = 5)
+
+  paste0("Under the '", policy, "' policy, the predicted racial/ethnic disparity in discipline rates is ",
+         predicted_disparities[[policy]], "%.")
+})
+
+textOutput("policy_prediction")
+
+### 📌 Improved Suspension Rate Forecast Plot
+output$forecast_plot <- renderPlotly({
+  
+  # Ensure BL suspension rates exist & create time-series object
+  ts_data <- ts(int_data$BL, start = min(int_data$YEAR), frequency = 1) 
+  
+  # Fit ARIMA model
+  model <- auto.arima(ts_data)
+  
+  # Forecast for next 10 years
+  forecasted <- forecast(model, h = 10)
+  
+  # Convert forecast results to a dataframe
+  forecast_df <- data.frame(
+    Year = seq(max(int_data$YEAR) + 1, max(int_data$YEAR) + 10, by = 1),
+    Predicted = forecasted$mean,
+    Lower = forecasted$lower[,2],  # 95% confidence interval lower bound
+    Upper = forecasted$upper[,2]   # 95% confidence interval upper bound
+  )
+  
+  # 📌 Create Interactive Plotly Forecast Visualization
+  plot_ly() %>%
+    # Actual Data
+    add_lines(x = int_data$YEAR, y = int_data$BL, 
+              name = "Actual", line = list(color = "blue")) %>%
+    
+    # Forecasted Data
+    add_lines(x = forecast_df$Year, y = forecast_df$Predicted, 
+              name = "Forecast", line = list(color = "red", dash = "dash")) %>%
+    
+    # Confidence Interval (Shaded Area)
+    add_ribbons(x = forecast_df$Year, ymin = forecast_df$Lower, ymax = forecast_df$Upper, 
+                fillcolor = 'rgba(255, 0, 0, 0.2)', name = "95% Confidence Interval") %>%
+    
+    # Chart Layout
+    layout(
+      title = "Suspension Rate Forecast for Black Students",
+      xaxis = list(title = "Year"),
+      yaxis = list(title = "Suspension Rate (%)"),
+      legend = list(title = list(text = "Legend"))
+    )
+})
+
+plotlyOutput("forecast_plot")
+```
+
+
+```{r, eval=FALSE}
+
+### 📌 Filter Data for Non-Adopting States (DD == 0)
+non_adopting_states <- df %>%
+  filter(DD == 0) %>%   # States that have NOT adopted the ban
+  group_by(STATE_CODE, YEAR) %>%
+  summarize(OSS_rate = mean(OSS_, na.rm = TRUE))  # Average suspension rate per year
+
+### 📌 Train a Model on Adopting States (DD == 1)
+adopting_states <- df %>%
+  filter(DD == 1) %>%   # States that HAVE adopted the ban
+  group_by(STATE_CODE, YEAR) %>%
+  summarize(OSS_rate = mean(OSS_, na.rm = TRUE))
+
+# Create a time-series object using the suspension rate of adopting states
+ts_adopting <- ts(adopting_states$OSS_rate, start = min(adopting_states$YEAR), frequency = 1)
+
+# Fit ARIMA model to adopting states
+model_adopting <- auto.arima(ts_adopting)
+
+# Forecast impact for non-adopting states
+forecasted <- forecast(model_adopting, h = 10)  # 10-year prediction
+
+# Convert forecast results into a dataframe
+forecast_df <- data.frame(
+  Year = seq(max(non_adopting_states$YEAR) + 1, max(non_adopting_states$YEAR) + 10, by = 1),
+  Predicted_OSS = forecasted$mean,
+  Lower = forecasted$lower[,2],  # 95% Confidence Interval Lower Bound
+  Upper = forecasted$upper[,2]   # 95% Confidence Interval Upper Bound
+)
+
+### 📌 Create Interactive Plotly Forecast Visualization
+plot_ly() %>%
+  # Actual OSS Rates in Non-Adopting States
+  add_lines(data = non_adopting_states, 
+            x = ~YEAR, y = ~OSS_rate, 
+            name = "Actual OSS Rate (No Ban)", 
+            line = list(color = "blue")) %>%
+  
+  # Forecasted OSS Rates if Ban Were Adopted
+  add_lines(data = forecast_df, 
+            x = ~Year, y = ~Predicted_OSS, 
+            name = "Predicted OSS Rate (If Ban Adopted)", 
+            line = list(color = "red", dash = "dash")) %>%
+  
+  # Confidence Interval (Shaded)
+  add_ribbons(data = forecast_df, 
+              x = ~Year, ymin = ~Lower, ymax = ~Upper, 
+              fillcolor = 'rgba(255, 0, 0, 0.2)', name = "95% Confidence Interval") %>%
+  
+  # Layout
+  layout(
+    title = "Suspension Rate Forecast for States Without a Ban",
+    xaxis = list(title = "Year"),
+    yaxis = list(title = "Suspension Rate (%)"),
+        yaxis = list(range = c(0, NA)),
+    legend = list(title = list(text = "Legend"))
+  )
+
+plotlyOutput("forecast_plot")
+summary(df1)
+head(df1)
+
+```
+
+
+Predictive plot Corp
+=======================================================================
+
+Row {.tabset}
+-------------------------------------
+
+
+```{r, eval= FALSE}
+# Convert columns to numeric (handling potential text issues)
+cp <- df1 %>%
+  mutate(
+    ENR_ = as.numeric(ENR_),  
+    CORP_ = as.numeric(CORP_)
+  )
+
+# Merge df_corp with full state names
+cp <- left_join(df1, state_lookup, by = "STATE_CODE")
+
+# Fix DC missing in state mapping
+cp$region <- if_else(is.na(cp$region), "district of columbia", cp$region)
+
+# Merge with map data
+cp <- left_join(us_states_sf, cp, by = "region")
+## Combined all -- us_states_sf2
+
+# Calculate corporal punishment rate as a percentage of enrollment
+cp <- cp %>%
+  mutate(Corporal_Rate = pmax(CORP_ / ENR_) * 100) %>%
+  replace_na(list(Corporal_Rate = 0))  # Replace NaN values with 0
+# Aggregate by year and race
+df_trend <- cp %>%
+  group_by(YEAR, STATE_CODE, race) %>%
+  summarise(Corporal_Rate = mean(Corporal_Rate, na.action = na.exclude))
+
+df_trend <- df_trend %>%
+    mutate(Corporal_Rate = pmax(0, Corporal_Rate)) 
+
+
+# Apply LOESS smoothing for better trends
+df_trend <- df_trend %>%
+  group_by(race) %>%
+  mutate(Smoothed_Rate = predict(loess(Corporal_Rate ~ YEAR, span = 0.5)))
+
+# Define Custom Colors for Racial Groups
+race_colors <- c(
+  "AI" = "#bdbfbf",  # American Indian
+  "AS" = "#808c73",  # Asian
+  "BL" = "#677812",  # Black
+  "HI" = "#e5de54",  # Hispanic
+  "HP" = "#a1a1a1",  # Pacific Islander
+  "MR" = "#303333",  # Multiracial
+  "WH" = "#0c4d1d"  # White
+)
+
+ui <- fluidPage(
+  titlePanel("Corporal Punishment Ban Adoption and Trends"),
+  
+  sidebarLayout(
+    sidebarPanel(
+      h3("Selected State Statistics"),
+      textOutput("selected_state"),
+      verbatimTextOutput("summary_stats")
+    ),
+    
+    mainPanel(
+      plotOutput("map", click = "map_click"),  # ✅ Clickable static map
+      plotlyOutput("state_trend")  # ✅ Interactive trend plot
+    )
+  )
+)
+
+server <- function(input, output, session) {
+  
+  selected_state <- reactiveVal(NULL)
+  
+ # ✅ Generate the static map
+  output$map <- renderPlot({
+    ggplot() +
+        geom_sf(data = df_join, aes(fill = as.factor(DD)), color = "white", size = 0.3) +
+      scale_fill_manual(values = c("0" = "#e5de54", "1" = "#808c73"), labels = c("Not Adopted", "Adopted")) +
+      theme_minimal() +
+      labs(
+        title = "Corporal Punishment Ban Adoption by State",
+        subtitle = "States that adopted bans starting in 2020",
+        fill = "Ban Status"
+      ) +
+      theme(
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        panel.grid = element_blank()
+      )
+  })
+  
+   # ✅ Capture the state clicked on the map
+  observeEvent(input$map_click, {
+    require(input$map_click)
+    clicked_state <- df_join$region[which.min(st_distance(st_as_sf(df_join), st_point(c(input$map_click$x, input$map_click$y))))]
+    
+    if (!is.null(clicked_state)) {
+      selected_state(clicked_state)
+    }
+  })
+  
+  # ✅ Display the selected state name
+  output$selected_state <- renderText({
+    req(selected_state())
+    paste("Selected State:", selected_state())
+  })
+  
+  # ✅ Generate summary statistics
+  output$summary_stats <- renderPrint({
+    req(selected_state())
+    state_data <- df1 %>% filter(STATE_CODE == selected_state())
+    summary(state_data$Corporal_Rate)
+  })
+  
+  # ✅ Generate the interactive trend plot
+  output$state_trend <- renderPlotly({
+    req(selected_state())
+    
+    # # Filter data for selected state
+    # state_data <- df1 %>% filter(STATE_CODE == selected_state()) %>%
+    #   group_by(YEAR, race) %>%
+    #   summarise(Corporal_Rate = mean(Corporal_Rate, na.rm = TRUE))
+    # 
+    # # Apply LOESS smoothing for better trends
+    # state_data <- state_data %>%
+    #   group_by(race) %>%
+    #   mutate(Smoothed_Rate = predict(loess(Corporal_Rate ~ YEAR, span = 0.5, na.action = na.exclude)))
+    # 
+    # Create interactive Plotly plot
+    plot_ly(df_trend, x = ~YEAR, y = ~Smoothed_Rate, color = ~race, 
+            colors = race_colors, type = "scatter", mode = "lines") %>%
+      layout(
+        title = paste("Corporal Punishment Rates Over Time in", selected_state()),
+        xaxis = list(title = "Year"),
+        yaxis = list(title = "Corporal Punishment Rate (%)", range = c(0, NA)),  # Prevent negative values
+        legend = list(title = list(text = "Race"))
+      )
+  })
+}
+
+shinyApp(ui, server)
+
+
+
+
+# 
+# # Create Interactive Plot
+# plot <-plot_ly(df_trend, x = ~YEAR, y = ~Smoothed_Rate, color = ~race, 
+#         colors = race_colors, type = "scatter", mode = "lines") %>%
+#   layout(
+#     title = "Corporal Punishment Rates Over Time by Race",
+#     xaxis = list(title = "Year"),
+#     yaxis = list(title = "Corporal Punishment Rate (%)"),
+#      yaxis = list(range = c(0, NA)),  # ✅ Prevent below zero values
+#     legend = list(title = list(text = "Race"))
+#   )
+# # Display the Plot
+# plot
+# 
+# summary(cp$Corporal_Rate)
+```
+
+```{r, eval=TRUE}
+
+
+# Merge df_corp with full state names
+df1 <- left_join(df1, state_lookup, by = "STATE_CODE")
+
+# Fix DC missing in state mapping
+df1 $region <- if_else(is.na(df1$region), "district of columbia", df1$region)
+
+# Merge with map data
+df1 <- left_join(us_states_sf, df1, by = "region")
+## Combined all -- us_states_sf2
+
+# Convert columns to numeric (handling potential text issues)
+df1 <- df1 %>%
+  mutate(
+    ENR_ = as.numeric(ENR_),  
+    CORP_ = as.numeric(CORP_)
+  )
+
+# Calculate corporal punishment rate as a percentage of enrollment
+df1 <- df1 %>%
+  mutate(Corporal_Rate = pmax(CORP_ / ENR_, 0) * 100) %>%  # Ensure no negative values
+  replace_na(list(Corporal_Rate = 0))  # Replace NaN values with 0
+
+# Aggregate by year, state, and race
+df_trend <- df1 %>%
+  group_by(YEAR, STATE_CODE, race) %>%
+  summarise(Corporal_Rate = mean(Corporal_Rate, na.rm = TRUE), .groups = "drop")
+
+# Apply LOESS smoothing for better trends
+df_trend <- df_trend %>%
+  group_by(race) %>%
+  mutate(Smoothed_Rate = predict(loess(Corporal_Rate ~ YEAR, span = 0.5, na.action = na.exclude)))
+
+# Define race colors
+race_colors <- c(
+  "AI" = "#bdbfbf",  # American Indian
+  "AS" = "#808c73",  # Asian
+  "BL" = "#677812",  # Black
+  "HI" = "#e5de54",  # Hispanic
+  "HP" = "#a1a1a1",  # Pacific Islander
+  "MR" = "#303333",  # Multiracial
+  "WH" = "#0c4d1d"   # White
+)
+
+# UI Definition
+ui <- fluidPage(
+  titlePanel("Corporal Punishment Ban Adoption and Trends"),
+  
+  sidebarLayout(
+    sidebarPanel(
+      h3("Selected State Statistics"),
+      textOutput("selected_state"),
+      verbatimTextOutput("summary_stats")
+    ),
+    
+    mainPanel(
+      plotOutput("map", click = "map_click"),  # ✅ Clickable static map
+      plotlyOutput("state_trend")  # ✅ Interactive trend plot
+    )
+  )
+)
+
+# Server Logic
+server <- function(input, output, session) {
+  
+  selected_state <- reactiveVal(NULL)
+  
+  # ✅ Generate the static map
+  output$map <- renderPlot({
+    ggplot() +
+      geom_sf(data = df_join, aes(fill = as.factor(DD)), color = "white", size = 0.3) +
+      scale_fill_manual(values = c("0" = "#e5de54", "1" = "#808c73"), labels = c("Not Adopted", "Adopted")) +
+      theme_minimal() +
+      labs(
+        title = "Corporal Punishment Ban Adoption by State",
+        subtitle = "States that adopted bans starting in 2020",
+        fill = "Ban Status"
+      ) +
+      theme(
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        panel.grid = element_blank()
+      )
+  })
+  
+  # ✅ Capture the state clicked on the map
+  observeEvent(input$map_click, {
+    req(input$map_click)
+    
+    # Convert click to sf object
+    clicked_point <- st_sfc(st_point(c(input$map_click$x, input$map_click$y)), crs = st_crs(df_join))
+    clicked_point <- st_as_sf(clicked_point)  # Convert to sf object
+    
+    # Find nearest state based on click
+    nearest_state_index <- st_nearest_feature(clicked_point, df_join)
+    clicked_state <- df_join$region[nearest_state_index]
+
+    if (!is.null(clicked_state)) {
+      selected_state(clicked_state)
+    }
+  })
+  
+  # ✅ Display the selected state name
+  output$selected_state <- renderText({
+    req(selected_state())
+    paste("Selected State:", selected_state())
+  })
+  
+  # ✅ Generate summary statistics
+  output$summary_stats <- renderPrint({
+    req(selected_state())
+    state_data <- df1 %>% filter(STATE_CODE == selected_state())
+    summary(state_data$Corporal_Rate)
+  })
+  
+  # ✅ Generate the interactive trend plot
+  output$state_trend <- renderPlotly({
+    req(selected_state())
+    
+    # Filter data for selected state
+    state_data <- df_trend %>%
+      filter(toupper(STATE_CODE) == toupper(selected_state()))
+
+    # Create interactive Plotly plot
+    plot_ly(state_data, x = ~YEAR, y = ~Smoothed_Rate, color = ~race, 
+            colors = race_colors, type = "scatter", mode = "lines") %>%
+      layout(
+        title = paste("Corporal Punishment Rates Over Time in", selected_state()),
+        xaxis = list(title = "Year"),
+        yaxis = list(title = "Corporal Punishment Rate (%)", range = c(0, NA)),  # Prevent negative values
+        legend = list(title = list(text = "Race"))
+      )
+  })
+}
+
+# Run Shiny App
+shinyApp(ui, server)
+
+```
+
