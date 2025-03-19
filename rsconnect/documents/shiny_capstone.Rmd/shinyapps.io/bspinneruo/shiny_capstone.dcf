@@ -5,6 +5,6 @@ account: bspinneruo
 server: shinyapps.io
 hostUrl: https://api.shinyapps.io/v1
 appId: 14285882
-bundleId: 9970401
+bundleId: 9971303
 url: https://bspinneruo.shinyapps.io/shiny_capstone/
 version: 1

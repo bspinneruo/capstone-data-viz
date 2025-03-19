@@ -410,7 +410,7 @@ plotlyOutput("state_plot", height = 600)
 
 
 
-# Corp Rates by State
+# Corporal Punishment Rates by State
 
 ## Row
 
@@ -577,3 +577,319 @@ output$corp_trend <- renderPlotly({
 plotlyOutput("corp_trend", height = 500)
 
 ```
+
+
+```{r, eval=FALSE}
+### Interactive map 
+output$corp_map2 <- renderLeaflet({
+
+    color_scale <- colorNumeric(
+    palette = colorRampPalette(c("#e0dfda", "#bdbfbf", "#303333"))(100),
+    domain = overall_corp_rate$mean_corp_rate
+  )
+    
+    leaflet(overall_corp_rate, options = leafletOptions(zoomControl = FALSE, dragging = TRUE)) %>%
+    
+    addTiles() %>%
+       
+    # ✅ Set initial view to focus on the U.S.
+    setView(lng = -98.5795, lat = 39.8283, zoom = 4) %>%  # Center at U.S. geographic center
+
+    # ✅ Restrict users from moving outside the U.S.
+    fitBounds(lng1 = -125, lat1 = 25, lng2 = -66, lat2 = 50) %>%
+    
+    addPolygons(
+   fillColor = ~colorNumeric(
+    palette = colorRampPalette(c( "#e0dfda", "#bdbfbf","#303333"))(100),
+    domain = overall_corp_rate$mean_corp_rate)(mean_corp_rate),
+      color = "white",
+      weight = 1,
+  fillOpacity = .8,
+      highlightOptions = highlightOptions(weight = 3, color = "#666", fillOpacity = 0.9),
+      label = ~paste0(region, ": ", round(mean_corp_rate, 2), "% Avg. Corporal Punishment"),
+      layerId = ~STATE_CODE  # Use STATE_CODE instead of region
+    ) %>% 
+         addControl(
+      html = "<div style='font-weight: bold; font-size:16px; color: black; text-align: center;'>
+                Average Corporal Punishment Rate by State from 1972 to 2020
+              <br>
+              <span style='font-weight:normal; font-size:14px;'>
+                Select State to Reveal Corporal Trends by Race over Time
+              </span>
+              </div>", 
+      position = "topleft"
+    ) %>% 
+     addLegend(
+  "bottomright",
+  pal = color_scale,
+  values = overall_corp_rate$mean_corp_rate,
+  title = "Avg. Corporal Rate (%)\n(Light = Low, Dark = High)",
+  labFormat = labelFormat(suffix = "%"),
+  opacity = 0.9,
+    bins = 4,
+  na.label = ""  
+)
+})
+
+
+leafletOutput("corp_map2", height = 500) 
+
+```
+
+
+
+```{r, eval=FALSE}
+selected_state_corp2 <- reactiveVal(NULL)
+
+observeEvent(input$corp_map2_shape_click, {
+  clicked_state_corp2 <- input$corp_map2_shape_click$id
+  if (!is.null(clicked_state_corp2)) {
+    selected_state_corp2(clicked_state_corp2)
+  }
+})
+```
+
+```{r, eval=FALSE}
+# Load necessary libraries
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(broom)
+library(purrr)
+
+# Example: Assuming you have a data frame `df` with columns: STATE_CODE, YEAR, CORP_, ENR_, and ban_status (0 = no ban, 1 = ban)
+
+# Step 1: Calculate corporal punishment rates
+cp2 <- cp %>%
+  mutate(corp_rate = if_else(ENR_ > 0, (CORP_ / ENR_) * 100, 0))
+# Merge with map data
+ban_states_data<- cp2 %>%
+  left_join(df_corp_join %>% select(STATE_CODE, DD, T_YEAR), by = "STATE_CODE")
+# Step 2: Fit a model using states that banned corporal punishment
+library(lme4)
+
+model <- lmer(corp_rate ~ YEAR + (1 | STATE_CODE), data = ban_states_data %>% filter(DD == 1))
+
+# Step 3: Predict for non-ban states as if they had banned
+non_ban_states <- ban_states_data %>%
+  filter(DD == 0) %>%
+  mutate(predicted_rate_if_banned = predict(model, newdata = ., allow.new.levels = TRUE))
+
+# Step 4: Prepare long format for plotting
+non_ban_states_long <- non_ban_states %>%
+  select(STATE_CODE, YEAR, corp_rate, predicted_rate_if_banned) %>%
+  pivot_longer(cols = c(corp_rate, predicted_rate_if_banned), names_to = "Scenario", values_to = "Rate")
+
+# unique(non_ban_states_long$Scenario)
+# # Step 5: Improved visualization
+# state_to_plot <- "TX"  # Customize this dynamically if desired
+
+output$pred_plot <- renderPlot({
+  req(selected_state_corp2())
+
+ggplot(filter(non_ban_states_long, STATE_CODE == selected_state_corp2()), aes(x = YEAR, y = Rate, color = Scenario)) +
+  geom_line(aes(linetype = Scenario), size = 1.4) +
+  geom_point(data = filter(non_ban_states_long, STATE_CODE == selected_state_corp2() & Scenario == "corp_rate"),
+             aes(x = YEAR, y = Rate), color = "darkred", size = 1.5, alpha = 0.7) +
+  scale_color_manual(values = c("corp_rate" = "#d73027", "predicted_rate_if_banned" = "#4575b4")) +
+  labs(
+    title = paste("Predicted vs. Actual Corporal Punishment Rates for", selected_state_corp2()),
+    subtitle = "Blue = Predicted had a ban been adopted; Red = Actual reported rate",
+    x = "Year",
+    y = "Corporal Punishment Rate (%)",
+    caption = "Prediction modeled using data from states that implemented bans"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(size = 12, face = "italic")
+  )
+})
+
+plotOutput("pred_plot", height = 500)
+
+# 
+# non_ban_states_long2 <- non_ban_states %>%
+#   select(STATE_CODE, YEAR, corp_rate, predicted_rate_if_banned) %>%
+#   pivot_longer(cols = c(corp_rate, predicted_rate_if_banned), 
+#                names_to = "scenario", 
+#                values_to = "rate")
+# ggplot(filter(non_ban_states_long2, STATE_CODE == state_to_plot), 
+#        aes(x = YEAR, y = rate, color = scenario)) +
+#   geom_smooth(se = FALSE, method = "loess", span = 0.4, size = 1.5) +  # smooth lines
+#   scale_y_continuous(limits = c(0, max(non_ban_states_long$rate, na.rm = TRUE) * 1.1)) +
+#   scale_color_manual(values = c("corp_rate" = "darkred", "predicted_rate_if_banned" = "blue")) +
+#   labs(
+#     title = paste("Predicted vs. Actual Corporal Punishment Rates for", state_to_plot),
+#     subtitle = "Blue = Predicted if ban adopted; Red = Actual historical rates",
+#     y = "Corporal Punishment Rate (%)",
+#     x = "Year",
+#     color = "Scenario"
+#   ) +
+#   theme_minimal(base_size = 14) +
+#   theme(
+#     plot.title = element_text(face = "bold", size = 18),
+#     plot.subtitle = element_text(size = 14, face = "italic"),
+#     legend.position = "top"
+#   )
+```
+
+# Predictive Corporal Punishment Plot
+
+## Row {.tabset}
+
+```{r}
+### Interactive map 
+output$corp_map2 <- renderLeaflet({
+
+    color_scale <- colorNumeric(
+    palette = colorRampPalette(c("#e0dfda", "#bdbfbf", "#303333"))(100),
+    domain = overall_corp_rate$mean_corp_rate
+  )
+    
+    leaflet(overall_corp_rate, options = leafletOptions(zoomControl = FALSE, dragging = TRUE)) %>%
+    
+    addTiles() %>%
+       
+    # ✅ Set initial view to focus on the U.S.
+    setView(lng = -98.5795, lat = 39.8283, zoom = 4) %>%  # Center at U.S. geographic center
+
+    # ✅ Restrict users from moving outside the U.S.
+    fitBounds(lng1 = -125, lat1 = 25, lng2 = -66, lat2 = 50) %>%
+    
+    addPolygons(
+   fillColor = ~colorNumeric(
+    palette = colorRampPalette(c( "#e0dfda", "#bdbfbf","#303333"))(100),
+    domain = overall_corp_rate$mean_corp_rate)(mean_corp_rate),
+      color = "white",
+      weight = 1,
+  fillOpacity = .8,
+      highlightOptions = highlightOptions(weight = 3, color = "#666", fillOpacity = 0.9),
+      label = ~paste0(region, ": ", round(mean_corp_rate, 2), "% Avg. Corporal Punishment"),
+      layerId = ~STATE_CODE  # Use STATE_CODE instead of region
+    ) %>% 
+         addControl(
+      html = "<div style='font-weight: bold; font-size:16px; color: black; text-align: center;'>
+                Average Corporal Punishment Rate by State from 1972 to 2020
+              <br>
+              <span style='font-weight:normal; font-size:14px;'>
+                Select State to Reveal Corporal Predictions had a State Adopted Corporal Bans over Time
+              </span>
+              </div>", 
+      position = "topleft"
+    ) %>% 
+     addLegend(
+  "bottomright",
+  pal = color_scale,
+  values = overall_corp_rate$mean_corp_rate,
+  title = "Avg. Corporal Rate (%)\n(Light = Low, Dark = High)",
+  labFormat = labelFormat(suffix = "%"),
+  opacity = 0.9,
+    bins = 4,
+  na.label = ""  
+)
+})
+
+
+leafletOutput("corp_map2", height = 500) 
+
+```
+
+
+
+```{r}
+selected_state_corp2 <- reactiveVal(NULL)
+
+observeEvent(input$corp_map2_shape_click, {
+  clicked_state_corp2 <- input$corp_map2_shape_click$id
+  if (!is.null(clicked_state_corp2)) {
+    selected_state_corp2(clicked_state_corp2)
+  }
+})
+```
+
+```{r}
+# Load necessary libraries
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(broom)
+library(purrr)
+
+# Example: Assuming you have a data frame `df` with columns: STATE_CODE, YEAR, CORP_, ENR_, and ban_status (0 = no ban, 1 = ban)
+
+# Step 1: Calculate corporal punishment rates
+cp2 <- cp %>%
+  mutate(corp_rate = if_else(ENR_ > 0, (CORP_ / ENR_) * 100, 0))
+# Merge with map data
+ban_states_data<- cp2 %>%
+  left_join(df_corp_join %>% select(STATE_CODE, DD, T_YEAR), by = "STATE_CODE")
+
+```
+
+
+
+```{r}
+# Load libraries
+library(dplyr)
+library(tidyr)
+library(lme4)
+library(ggplot2)
+
+# # Step 1: Calculate corporal punishment rates
+# cp2 <- cp %>%
+#   mutate(corp_rate = if_else(ENR_ > 0, (CORP_ / ENR_) * 100, 0))
+#
+# # Step 2: Merge with treatment year info
+# ban_states_data <- cp2 %>%
+#   left_join(df_corp_join %>% select(STATE_CODE, DD, T_YEAR), by = "STATE_CODE")
+
+ban_states_data2 <- cp2 %>%
+  left_join(df_corp_join %>% select(STATE_CODE, DD, T_YEAR), by = "STATE_CODE") %>%
+  filter(corp_rate > 0) %>%
+  mutate(log_corp_rate = log(corp_rate))
+
+library(lme4)
+model <- lmer(log_corp_rate ~ YEAR + (1 | STATE_CODE), data = ban_states_data2 %>% filter(DD == 1))
+
+# Reactive prediction plot generation for clicked state
+output$realistic_pred_plot <- renderPlot({
+  req(selected_state_corp2())
+
+  # Predict for non-ban states realistically
+  non_ban_states2 <- ban_states_data2 %>%
+    filter(DD == 0 & corp_rate > 0) %>%
+    mutate(predicted_log_rate = predict(model, newdata = ., allow.new.levels = TRUE),
+           predicted_rate_if_banned = exp(predicted_log_rate))
+
+  non_ban_states_long <- non_ban_states2 %>%
+    select(STATE_CODE, YEAR, corp_rate, predicted_rate_if_banned) %>%
+    pivot_longer(cols = c(corp_rate, predicted_rate_if_banned), names_to = "Scenario", values_to = "Rate")
+
+  ggplot(filter(non_ban_states_long, STATE_CODE == selected_state_corp2()),
+         aes(x = YEAR, y = Rate, color = Scenario)) +
+geom_smooth(aes(linetype = Scenario), se = FALSE, linewidth = 1.4, method = "loess", span = 0.5) +
+    scale_color_manual(values = c("corp_rate" = "#808c73", "predicted_rate_if_banned" = "#e5de54"),
+                       labels = c("Actual reported rate", "Predicted if banned")) +
+    labs(
+      title = paste("Log-Based DiD Predicted vs. Actual Corp. Punishment Rates for", selected_state_corp2()),
+      subtitle = "Blue = Predicted if ban had been adopted; Red = Actual reported rate",
+      x = "Year",
+      y = "Corporal Punishment Rate (%)",
+      caption = "Predictions based on a log-linear DiD model"
+    ) +
+    guides(color = guide_legend(title = "Scenario"), linetype = "none") +  
+    theme_minimal(base_size = 14) +
+    theme(
+      legend.position = "bottom",
+      plot.title = element_text(face = "bold"),
+      plot.subtitle = element_text(size = 12, face = "italic")
+    )
+})
+
+## Row for prediction plot below corp_trend
+plotOutput("realistic_pred_plot", height = 500)
+
+```
+
