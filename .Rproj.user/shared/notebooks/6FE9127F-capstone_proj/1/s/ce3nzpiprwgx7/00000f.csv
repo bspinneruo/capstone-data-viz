@@ -1,6 +1,0 @@
-"0","# Placeholder data for policy simulation"
-"0","policies <- c(""No Change"", ""Restorative Practices"", ""Corporal Punishment Ban"")"
-"0","predicted_disparities <- c(15, 10, 5)  # Placeholder predictions"
-"0",""
-"0","# UI for user to select policy"
-"0","selectInput(""policy"", ""Select Policy:"", choices = policies)"

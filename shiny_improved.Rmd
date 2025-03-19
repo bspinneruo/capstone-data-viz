@@ -1,0 +1,478 @@
+---
+title: "Racial Disparities in School Discipline: Explorer Dashboard"
+author: Brittany Spinner
+output:
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+    theme:
+      version: 4
+      bg: "white"
+      fg: "#303333"
+      primary: "#e5de54"
+      navbar-bg: "#808c73"
+runtime: shiny
+---
+
+# Dashboard
+
+## Row
+
+### Corpral ban status by State Since 2020
+
+```{r}
+
+library(flexdashboard)
+library(shiny)
+library(ggplot2)
+library(dplyr)
+library(leaflet)
+library(plotly)
+library(sf)
+library(rio)
+library(here)
+library(tidyverse)
+# install.packages("rsconnect")
+library(rsconnect)
+library(showtext)
+
+# setwd("/Users/brittanyspinner/Desktop/QRME PhD 24-25/phd_w2025/educ640_capstone/educ640_R")
+# # ✅ Define the path to your Seaford font
+# seaford_font_path <- file.path(getwd("fonts/Seaford.ttf"))
+# 
+# # ✅ Register the font if the file exists
+# if (file.exists(seaford_font_path)) {
+#   font_add("Seaford", seaford_font_path)
+# } else {
+#   warning("⚠️ Font file not found: Seaford.ttf")
+# }
+
+# # ✅ Enable text rendering
+# showtext_auto()
+
+# Load Data
+df1 <- import(here::here("data/corp_76to20_bystate_MGyearrecoded.xlsx"))
+df2 <- import(here::here("data/suspensions_72to21_bystate_MGyearrecoded.xlsx"))
+df3 <- import(here::here("data/treatment dataset_2year.xlsx"))
+
+# Filter for states adopting bans in 2020+
+df_corp <- df3 %>%
+  filter(YEAR > 2020) %>%
+  group_by(STATE_CODE)
+
+
+# Convert US states to an sf object
+us_states_sf <- st_as_sf(maps::map("state", fill = TRUE, plot = FALSE))
+
+
+# Ensure the correct CRS (Convert to EPSG:4326 - WGS84)
+us_states_sf <- st_transform(us_states_sf, crs = 4326)  # convert CRS to WGS84
+
+
+# Fix column names for merging
+us_states_sf <- us_states_sf %>%
+  rename(region = ID) %>%
+  mutate(region = tolower(region))
+
+# Create state lookup for abbreviations
+state_lookup <- data.frame(STATE_CODE = state.abb, region = tolower(state.name))
+
+# Merge df_corp with full state names
+df_corp_join <- left_join(df_corp, state_lookup, by = "STATE_CODE")
+
+# Fix DC missing in state mapping
+df_corp_join$region <- if_else(is.na(df_corp_join$region), "district of columbia", df_corp_join$region)
+
+# Merge with map data
+df_join <- left_join(us_states_sf, df_corp_join, by = "region")
+
+# Define color palette
+color_palette <- list("0" = "#e5de54", "1" = "#808c73")
+
+brand_colors <- list(
+  dark_gray = "#303333",
+  sage = "#808c73",
+  light_gray = "#bdbfbf"
+)
+
+
+# Store selected state in a reactive value
+selected_state <- reactiveVal(NULL)
+
+# 
+# df_join <- st_make_valid(df_join) %>%
+#   filter(st_is_valid(.)) %>%
+#   st_transform(crs = 4326) 
+# # Create state lookup for abbreviations
+# state_lookup <- data.frame(STATE_CODE = state.abb, region = tolower(state.name))
+
+
+```
+
+```{r}
+### Static Map
+# #===============================
+# # Brand Theme Definition
+# #===============================
+theme_brand <- function(base_size = 12) {
+  theme_minimal(base_size = base_size) %+replace%
+    theme(
+      # Text elements
+      text = element_text(family = "Seaford"),  # Seaford
+      plot.title = element_text(
+        size = rel(1.2),
+        face = "bold"
+      ),
+      plot.subtitle = element_text(
+        size = rel(1)
+      ),
+      axis.title = element_text(
+        face = "bold"
+      ),
+
+      # Grid elements
+      panel.grid.major = element_line(color = brand_colors$light_gray),
+      panel.grid.minor = element_blank(),
+
+      # Legend
+      legend.position = "bottom"
+    )
+}
+
+
+  
+output$static_map <- renderPlot({
+  ggplot() +
+    geom_sf(data = df_join, aes(fill = as.factor(DD)), color = "white", size = 0.3) +
+    scale_fill_manual(values = color_palette, labels = c("Not Adopted", "Adopted")) +
+    theme_brand() +
+    labs(
+      title = "Corporal Punishment Ban Adoption by State",
+      subtitle = "States that adopted bans starting in 2020",
+      fill = "Ban Status"
+    ) +
+    theme_minimal()
+})
+
+
+plotOutput("static_map")
+```
+
+# Suspension Rates by State
+
+## Row {#main_tabs .tabset}
+
+```{r, warning=FALSE, message=FALSE}
+## need to join df_join with long data
+# Merge df_corp with full state names
+
+# Fix DC missing in state mapping
+df_corp2 <- left_join(df2, state_lookup, by = "STATE_CODE")
+df_corp2$region <- if_else(is.na(df_corp2$region), "district of columbia", df_corp2$region)
+
+# Merge with map data
+int_data <- left_join(us_states_sf, df_corp2, by = "region")
+## Combined all -- us_states_sf2
+
+### Pivot race wider 
+
+int_data <- int_data %>%
+  mutate(across(c(pct_, OSS_), ~ replace_na(.x, 0))) %>%  # Replace NA with 0 in selected columns
+  pivot_wider(
+    names_from = race,   # Convert race categories into column names
+    values_from = pct_,  # Values to fill in new columns
+    values_fill = list(pct_ = 0)) # replace na's with 0s
+# Drop geometry column before summarization
+# 
+# int_data_clean <- int_data %>%
+#   st_drop_geometry()  # Removes spatial geometry
+# 
+# int_data_clean <- int_data_clean %>%
+#   group_by(region) %>%
+#   summarise(Average_Suspensions = mean(total, na.rm = TRUE))
+# 
+# int_data <- left_join(int_data_clean, int_data, by = "region")
+# 
+
+# # Drop geometry column before summarization
+# int_data_clean <- int_data %>%
+#   st_drop_geometry()  # Removes spatial geometry
+
+long_data <- int_data %>%
+    pivot_longer(cols = c(AI, AS, BL, HI, HP, MR, WH, total), names_to = "race", values_to = "pct_") %>% 
+  group_by(YEAR, race, STATE_CODE)
+
+
+
+# View transformed data
+#head(int_data)
+
+### Interactive map 
+output$map <- renderLeaflet({
+  leaflet(int_data, options = leafletOptions(zoomControl = FALSE, dragging = FALSE)) %>%
+    
+    addTiles() %>%
+       
+    # ✅ Set initial view to focus on the U.S.
+    setView(lng = -98.5795, lat = 39.8283, zoom = 4) %>%  # Center at U.S. geographic center
+    
+    # ✅ Restrict users from moving outside the U.S.
+    fitBounds(lng1 = -125, lat1 = 25, lng2 = -66, lat2 = 50) %>%
+    
+    addPolygons(
+   fillColor = ~colorNumeric(
+    palette = colorRampPalette(c( "#303333", "#e0dfda", "#f0efed"))(100),
+    domain = int_data$total
+  )(total),
+      color = "white",
+      weight = 1,
+  fillOpacity = .8,
+      highlightOptions = highlightOptions(weight = 3, color = "#666", fillOpacity = 0.9),
+      label = ~paste0(region, ": ", round(total, 2), "% Avg. Overall Suspended"),
+      layerId = ~STATE_CODE  # Use STATE_CODE instead of region
+    )
+})
+
+leafletOutput("map", height = 600)
+
+
+
+
+
+```
+
+```{r}
+
+
+########################################################
+### Observe Click on Map (Dynamically Updates Timeline)
+selected_state <- reactiveVal(NULL)
+
+observeEvent(input$map_shape_click, {
+  print(input$map_shape_click)  # check if this captures a state
+  clicked_state <- input$map_shape_click$id  # Get the clicked state name
+  
+  if (!is.null(clicked_state)) {
+    print(paste("Clicked State:", clicked_state))  # print clicked state
+    selected_state(clicked_state)  # Store clicked state in reactive value
+    updateTabsetPanel(session, "main_tabs", selected = "State Timeline")
+  }
+})
+```
+
+```{r}
+
+
+###### State-Specific Trends Plotly Time Series 
+output$state_plot <- renderPlotly({
+  req(selected_state())  # Ensure a state is selected
+
+  # Filter data for selected state
+state_data <- long_data %>% filter(STATE_CODE == selected_state())  # Match with STATE_CODE
+
+ state_data <- state_data %>%
+    mutate(pct_ = pmax(0, pct_)) 
+
+  # Create smoothed data
+  smoothed_data <- state_data %>%
+    group_by(race) %>%
+    mutate(Smoothed = pmax(0, predict(loess(pct_ ~ YEAR, span = 0.3))))
+
+  # Define custom colors
+race_colors <- c(
+  "AI" = "#bdbfbf",  # American Indian
+  "AS" = "#808c73",  # Asian
+  "BL" = "#677812",  # Black
+  "HI" = "#e5de54",  # Hispanic
+  "HP" = "#a1a1a1",  # Pacific Islander
+  "MR" = "#303333",  # Multiracial
+  "WH" = "#0c4d1d"  # White
+)
+
+
+  # Create interactive Plotly line chart
+  plot_ly(
+    data = state_data, 
+    x = ~YEAR, 
+    y = ~Smoothed, 
+    color = ~race, 
+    colors = race_colors
+    # type = 'scatter', 
+    # mode = 'lines'
+  ) %>%
+  add_trace(
+    data = smoothed_data, 
+    x = ~YEAR, 
+    y = ~Smoothed, 
+    color = ~race, 
+     colors = race_colors,
+    type = 'scatter', 
+    mode = 'lines',
+    showlegend = TRUE  # Hide duplicate legend entries
+  ) %>%
+  layout(
+    title = paste("Suspension Rates in", selected_state()),
+    xaxis = list(title = "Year"),
+    yaxis = list(title = "Suspension Rate (%)"),
+    legend = list(title = list(text = "Race"),
+                          hovermode = "x unified")
+  )
+})
+
+plotlyOutput("state_plot", height = 500)
+```
+
+## Row {.tabset, id="main_tabs"}
+
+```{r}
+tabPanel("State Timeline", plotlyOutput("state_plot", height = 500))  # ✅ Use `plotlyOutput()`
+
+```
+
+
+# Corp Rates by State
+
+## Row {#second_tab .tabset}
+
+```{r, eval= TRUE}
+# Convert columns to numeric (handling potential text issues)
+cp <- df1 %>%
+  mutate(
+    ENR_ = as.numeric(ENR_),  
+    CORP_ = as.numeric(CORP_)
+  )
+
+# Merge df_corp with full state names
+cp <- left_join(cp, state_lookup, by = "STATE_CODE")
+
+# Fix DC missing in state mapping
+cp$region <- if_else(is.na(cp$region), "district of columbia", cp$region)
+
+# Merge with map data
+cp <- left_join(us_states_sf, cp, by = "region")
+## Combined all -- us_states_sf2
+
+# Calculate corporal punishment rate as a percentage of enrollment
+df_trend <- cp %>%
+  mutate(Corporal_Rate = pmax(CORP_ / ENR_) * 100) %>%
+  replace_na(list(Corporal_Rate = 0))  # Replace NaN values with 0
+# 
+# df_trend <- df_trend %>%
+#     mutate(Corporal_Rate = pmax(0, Corporal_Rate))  
+
+
+# Define Custom Colors for Racial Groups
+race_colors <- c(
+  "AI" = "#bdbfbf",  # American Indian
+  "AS" = "#808c73",  # Asian
+  "BL" = "#677812",  # Black
+  "HI" = "#e5de54",  # Hispanic
+  "HP" = "#a1a1a1",  # Pacific Islander
+  "MR" = "#303333",  # Multiracial
+  "WH" = "#0c4d1d"  # White
+)
+
+```
+
+```{r}
+library(sf)
+# class(df_trend)
+# df_join <- st_transform(df_join, crs = 4326)
+
+
+  # ✅ Generate interactive Leaflet map
+  output$corp_map <- renderLeaflet({
+    leaflet(df_join) %>%
+      addTiles() %>%
+      setView(lng = -98.5795, lat = 39.8283, zoom = 4) %>%
+      addPolygons(
+        fillColor = ~colorFactor(c("Not Adopted" = "#e5de54", "Adopted" = "#808c73"), df_join$DD)(DD),
+        color = "white",
+        weight = 1,
+        fillOpacity = 0.8,
+        highlightOptions = highlightOptions(weight = 3, color = "#666", fillOpacity = 0.9),
+        label = ~paste(region, ": ", ifelse(DD == 1, "Adopted", "Not Adopted")),
+        layerId = ~STATE_CODE  # Ensure each state has an ID
+      )
+  })
+  
+
+leafletOutput("corp_map", height = 600)
+```
+
+```{r}
+selected_state <- reactiveVal(NULL)
+  # ✅ Capture clicks on the map
+observeEvent(input$corp_map_shape_click, {
+  print(input$corp_map_shape_click)  # check if this captures a state
+  clicked_state <- input$corp_map_shape_click$id  # Get the clicked state name
+    selected_state(clicked_state)  # Store clicked state in reactive value
+    updateTabsetPanel(session, "second_tab", selected = "State Corp Trends")
+  })
+```
+
+
+
+```{r, eval = TRUE, warning=FALSE, message=FALSE}
+
+
+output$corp_trend <- renderPlotly({
+  req(selected_state())  # Ensure a state is selected
+
+  state_data2 <- df_trend %>% filter(STATE_CODE == selected_state()) 
+  
+
+  # # ✅ Create smoothed data
+  # smoothed_data <- state_data %>%
+  #   group_by(race) %>%
+  #   mutate(Smoothed = predict(loess(Corporal_Rate ~ YEAR, span = 0.3, na.action = na.exclude)))
+
+# # Apply LOESS smoothing for better trends
+#    if (nrow(state_data2) >= 5) {  
+#       state_data2 <- state_data2 %>%
+#         mutate(Smoothed_avg_Rate = predict(loess(avg_corp_rate ~ YEAR, span = 0.5, na.action = na.exclude)))
+#     } else {
+#       state_data2$Smoothed_avg_Rate <- state_data2$avg_corp_rate  # ✅ Use raw values if LOESS fails
+#     }
+  
+  
+  # Create interactive Plotly line chart
+  plot_ly(
+    data = state_data2, 
+    x = ~YEAR, 
+    y = ~Corporal_Rate, 
+    color = ~race, 
+    colors = race_colors
+    # type = 'scatter', 
+    # mode = 'lines'
+  ) %>%
+  add_trace(
+    data = state_data2, 
+    x = ~YEAR, 
+    y = ~Corporal_Rate, 
+    color = ~race, 
+     colors = race_colors,
+    type = 'scatter', 
+    mode = 'lines',
+    showlegend = TRUE  # Hide duplicate legend entries
+  ) %>%
+  layout(
+    title = paste("Corporal Punishment Rates Over Time in", selected_state()),
+    xaxis = list(title = "Year"),
+    yaxis = list(title = "Corporal Punishment Rate (%)"),
+    legend = list(title = list(text = "Race"),
+                          hovermode = "x unified")
+  )
+})
+
+
+plotlyOutput("corp_trend", height = 500)
+```
+
+## Row {.tabset, id="second_tab"}
+
+```{r}
+tabPanel("State Corp Trends", plotlyOutput("corp_trend", height = 500))  # ✅ Use `plotlyOutput()`
+
+```
+
